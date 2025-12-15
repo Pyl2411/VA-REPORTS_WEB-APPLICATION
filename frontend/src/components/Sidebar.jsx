@@ -1,5 +1,6 @@
 import './Sidebar.css'
 import { useAuth } from './AuthContext'
+// sidebar doesn't manage MoM state; CreateMoM is a separate page
 
 const highlights = [
   'Structured onboarding for field engineers',
@@ -15,6 +16,7 @@ const quickLinks = [
 
 function Sidebar({ currentPage, onPageChange }) {
   const { user } = useAuth()
+  // CreateMoM is a separate page; Sidebar only navigates to it
 
   return (
     <aside className="vh-sidebar">
@@ -52,23 +54,34 @@ function Sidebar({ currentPage, onPageChange }) {
 
       {/* Activity Display for all roles */}
       {user && (
-        <nav className="vh-nav">
-          <h2>Monitoring</h2>
-          <ul className="vh-nav-links">
-            <li>
-              <button
-                className={currentPage === 'activity' ? 'active' : ''}
-                onClick={() => onPageChange('activity')}
-                type="button"
-              >
-                📊 View Activities
-                {(user.role === 'Manager' || user.role === 'Team Leader') && <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}> (All)</span>}
-                {(user.role === 'Senior Engineer' || user.role === 'Junior Engineer') && <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}> (Mine)</span>}
-              </button>
-            </li>
-          </ul>
-          
-        </nav>
+        <>
+          <nav className="vh-nav">
+            <h2>Monitoring</h2>
+            <ul className="vh-nav-links">
+              <li>
+                <button
+                  className={currentPage === 'activity' ? 'active' : ''}
+                  onClick={() => onPageChange('activity')}
+                  type="button"
+                >
+                  📊 View Activities
+                  {(user.role === 'Manager' || user.role === 'Team Leader') && <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}> (All)</span>}
+                  {(user.role === 'Senior Engineer' || user.role === 'Junior Engineer') && <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}> (Mine)</span>}
+                </button>
+              </li>
+            </ul>
+          </nav>
+
+          {/* Create MoM panel */}
+          <section className="vh-nav" style={{ marginTop: '1rem' }}>
+            <h2>Create MoM</h2>
+            <ul className="vh-nav-links">
+              <li>
+                <button className={currentPage === 'create-mom' ? 'active' : ''} onClick={() => onPageChange('create-mom')} type="button">Create MoM (Download)</button>
+              </li>
+            </ul>
+          </section>
+        </>
       )}
 
       <section className="vh-highlight">

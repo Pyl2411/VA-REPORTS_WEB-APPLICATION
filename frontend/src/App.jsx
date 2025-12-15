@@ -4,6 +4,7 @@ import AuthForm from './components/AuthForm'
 import HourlyReportForm from './components/HourlyReportForm'
 import DailyTargetForm from './components/DailyTargetForm'
 import ActivityDisplay from './components/ActivityDisplay'
+import CreateMoM from './components/CreateMoM'
 import { AuthProvider, useAuth } from './components/AuthContext'
 import './App.css'
 import './index.css'
@@ -35,6 +36,8 @@ function Content() {
             <DailyTargetForm />
           ) : currentPage === 'activity' ? (
             <ActivityDisplay />
+          ) : currentPage === 'create-mom' ? (
+            <CreateMoM />
           ) : (
             <HourlyReportForm />
           )

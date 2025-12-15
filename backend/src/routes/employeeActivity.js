@@ -74,7 +74,15 @@ router.get('/activities', verifyToken, async (req, res) => {
              dtr.problem_faced AS problemFaced,
              dtr.incharge AS username,
              dtr.created_at AS createdAt,
-             'daily' AS reportType
+             'daily' AS reportType,
+             dtr.customer_name AS customerName,
+             dtr.customer_person AS customerPerson,
+             dtr.customer_contact AS custContact,
+             dtr.end_customer_name AS endCustName,
+             dtr.end_customer_person AS endCustPerson,
+             dtr.end_customer_contact AS endCustContact,
+             dtr.site_location AS siteLocation
+                     , NULL AS hourlyActivity
       FROM daily_target_reports dtr
       ${dailyWhere}
     `
@@ -90,17 +98,35 @@ router.get('/activities', verifyToken, async (req, res) => {
              hr.problem_faced_by_engineer_hourly AS problemFaced,
              u.username AS username,
              hr.created_at AS createdAt,
-             'hourly' AS reportType
+             'hourly' AS reportType,
+             NULL AS customerName,
+             NULL AS customerPerson,
+             NULL AS custContact,
+             NULL AS endCustName,
+             NULL AS endCustPerson,
+             NULL AS endCustContact,
+             NULL AS siteLocation,
+             hr.hourly_activity AS hourlyActivity
       FROM hourly_reports hr
       LEFT JOIN users u ON hr.user_id = u.id
       ${hourlyWhere}
     `
 
-    // Union both queries and order by createdAt
-    const unionQuery = `(${dailyQuery}) UNION ALL (${hourlyQuery}) ORDER BY createdAt DESC LIMIT ${limitNum} OFFSET ${offset}`
+    // Union both queries, wrap in an outer select to ORDER/LIMIT safely
+    const combinedQuery = `
+      SELECT id, reportDate, inTime, outTime, projectNo, locationType, dailyTargetAchieved, problemFaced, username, createdAt, reportType,
+             customerName, customerPerson, custContact, endCustName, endCustPerson, endCustContact, siteLocation, hourlyActivity
+      FROM (
+        (${dailyQuery})
+        UNION ALL
+        (${hourlyQuery})
+      ) AS combined
+      ORDER BY createdAt DESC
+      LIMIT ${limitNum} OFFSET ${offset}
+    `
 
-    console.log('Executing union activities query for role', role, 'with params', params)
-    const [activities] = await pool.execute(unionQuery, params)
+    console.log('Executing combined activities query for role', role, 'with params', params)
+    const [activities] = await pool.execute(combinedQuery, params)
     console.log('Fetched combined activities count:', activities.length)
 
     res.json({
@@ -242,3 +268,100 @@ router.get('/absentees', verifyToken, async (req, res) => {
 })
 
 export default router
+
+// Temporary debug route to inspect the combined activities SQL and parameters
+router.get('/activities-debug', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id
+    const role = req.user.role || ''
+    const { page = 1, limit = 20 } = req.query
+
+    const pageNum = parseInt(page) || 1
+    const limitNum = parseInt(limit) || 20
+    const offset = (pageNum - 1) * limitNum
+
+    const r = (role || '').toLowerCase()
+    const isManagerish = r.includes('manager') || r.includes('team leader') || r.includes('group leader')
+
+    let dailyWhere = ''
+    let hourlyWhere = ''
+    let params = []
+    let username = null
+    if (!isManagerish) {
+      const [uRows] = await pool.execute('SELECT username FROM users WHERE id = ?', [userId])
+      username = (uRows && uRows[0] && uRows[0].username) || null
+      dailyWhere = ' WHERE (dtr.user_id = ? OR dtr.incharge = ?)'
+      hourlyWhere = ' WHERE (hr.user_id = ? OR u.username = ?)'
+      params = [userId, username, userId, username]
+    }
+
+    const dailyQuery = `
+      SELECT dtr.id as id,
+             dtr.report_date AS reportDate,
+             dtr.in_time AS inTime,
+             dtr.out_time AS outTime,
+             dtr.project_no AS projectNo,
+             dtr.location_type AS locationType,
+             dtr.daily_target_achieved AS dailyTargetAchieved,
+             dtr.problem_faced AS problemFaced,
+             dtr.incharge AS username,
+             dtr.created_at AS createdAt,
+             'daily' AS reportType,
+             dtr.customer_name AS customerName,
+             dtr.customer_person AS customerPerson,
+             dtr.customer_contact AS custContact,
+             dtr.end_customer_name AS endCustName,
+             dtr.end_customer_person AS endCustPerson,
+             dtr.end_customer_contact AS endCustContact,
+             dtr.site_location AS siteLocation,
+             NULL AS hourlyActivity
+      FROM daily_target_reports dtr
+      ${dailyWhere}
+    `
+
+    const hourlyQuery = `
+      SELECT hr.id AS id,
+             hr.report_date AS reportDate,
+             NULL AS inTime,
+             NULL AS outTime,
+             hr.project_name AS projectNo,
+             NULL AS locationType,
+             hr.daily_target AS dailyTargetAchieved,
+             hr.problem_faced_by_engineer_hourly AS problemFaced,
+             u.username AS username,
+             hr.created_at AS createdAt,
+             'hourly' AS reportType,
+             NULL AS customerName,
+             NULL AS customerPerson,
+             NULL AS custContact,
+             NULL AS endCustName,
+             NULL AS endCustPerson,
+             NULL AS endCustContact,
+             NULL AS siteLocation,
+             hr.hourly_activity AS hourlyActivity
+      FROM hourly_reports hr
+      LEFT JOIN users u ON hr.user_id = u.id
+      ${hourlyWhere}
+    `
+
+    const combinedQuery = `
+      SELECT id, reportDate, inTime, outTime, projectNo, locationType, dailyTargetAchieved, problemFaced, username, createdAt, reportType,
+             customerName, customerPerson, custContact, endCustName, endCustPerson, endCustContact, siteLocation, hourlyActivity
+      FROM (
+        (${dailyQuery})
+        UNION ALL
+        (${hourlyQuery})
+      ) AS combined
+      ORDER BY createdAt DESC
+      LIMIT ${limitNum} OFFSET ${offset}
+    `
+
+    // count '?' placeholders in the combinedQuery for debugging
+    const placeholderCount = (combinedQuery.match(/\?/g) || []).length
+
+    return res.json({ sql: combinedQuery, params, paramCount: params.length, placeholderCount })
+  } catch (err) {
+    console.error('Debug route failed', err)
+    res.status(500).json({ message: 'Debug failed', error: err.toString() })
+  }
+})
