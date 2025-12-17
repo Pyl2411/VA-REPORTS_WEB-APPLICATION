@@ -1,10 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
-  server: {
+  base: '/', // or your base path if deploying to subdirectory
+  server: mode === 'development' ? {
     port: 5173,
     proxy: {
       '/api': {
@@ -12,5 +12,16 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  } : {},
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
   },
-})
+}))

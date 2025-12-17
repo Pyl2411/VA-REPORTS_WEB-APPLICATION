@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: va-report-frontend
+    env: static
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://va-report-backend.onrender.com
