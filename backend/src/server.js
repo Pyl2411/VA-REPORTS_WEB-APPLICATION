@@ -11,6 +11,14 @@ import authRouter from './routes/auth.js'
 import hourlyReportRouter from './routes/hourlyReport.js'
 import dailyTargetRouter from './routes/dailyTarget.js'
 import employeeActivityRouter from './routes/employeeActivity.js'
+let leaveRouter
+try {
+  leaveRouter = (await import('./routes/leave.js')).default
+  console.log('Leave router imported successfully:', !!leaveRouter)
+} catch (error) {
+  console.error('Failed to import leave router:', error)
+  leaveRouter = null
+}
 import pool from './db.js'
 
 dotenv.config()
@@ -52,6 +60,42 @@ async function migrateDatabase() {
     try {
       await pool.execute('ALTER TABLE users ADD COLUMN manager_id INT REFERENCES users(id)')
       console.log('✓ Added manager_id column to users table')
+    } catch (error) {
+      if (error.code === 'ER_DUP_FIELDNAME') {
+        // Column already exists, that's fine
+      } else {
+        throw error
+      }
+    }
+
+    // Try to add email column
+    try {
+      await pool.execute('ALTER TABLE users ADD COLUMN email VARCHAR(255) UNIQUE')
+      console.log('✓ Added email column to users table')
+    } catch (error) {
+      if (error.code === 'ER_DUP_FIELDNAME') {
+        // Column already exists, that's fine
+      } else {
+        throw error
+      }
+    }
+
+    // Try to add mobile column
+    try {
+      await pool.execute('ALTER TABLE users ADD COLUMN mobile VARCHAR(20)')
+      console.log('✓ Added mobile column to users table')
+    } catch (error) {
+      if (error.code === 'ER_DUP_FIELDNAME') {
+        // Column already exists, that's fine
+      } else {
+        throw error
+      }
+    }
+
+    // Try to add joining_date column
+    try {
+      await pool.execute('ALTER TABLE users ADD COLUMN joining_date DATE')
+      console.log('✓ Added joining_date column to users table')
     } catch (error) {
       if (error.code === 'ER_DUP_FIELDNAME') {
         // Column already exists, that's fine
@@ -196,6 +240,54 @@ async function migrateDatabase() {
         }
       }
     }
+
+    // Create leave_applications table
+    try {
+      await pool.execute(`
+        CREATE TABLE IF NOT EXISTS leave_applications (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL,
+          leave_type ENUM('casual', 'sick', 'paid') NOT NULL,
+          start_date DATE NOT NULL,
+          end_date DATE NOT NULL,
+          reason TEXT NOT NULL,
+          status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+          approved_by INT NULL,
+          approved_at TIMESTAMP NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+      `)
+      console.log('✓ Created leave_applications table')
+    } catch (error) {
+      console.error('Error creating leave_applications table:', error.message)
+    }
+
+    // Create leave_balances table
+    try {
+      await pool.execute(`
+        CREATE TABLE IF NOT EXISTS leave_balances (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL,
+          leave_year YEAR NOT NULL,
+          casual_leaves INT DEFAULT 12,
+          sick_leaves INT DEFAULT 12,
+          paid_leaves INT DEFAULT 0,
+          used_casual INT DEFAULT 0,
+          used_sick INT DEFAULT 0,
+          used_paid INT DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          UNIQUE KEY unique_user_year (user_id, leave_year)
+        )
+      `)
+      console.log('✓ Created leave_balances table')
+    } catch (error) {
+      console.error('Error creating leave_balances table:', error.message)
+    }
   } catch (error) {
     console.error('Migration error (non-fatal):', error.message)
   }
@@ -218,6 +310,7 @@ const limiter = rateLimit({
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS', // Skip OPTIONS requests
 })
 
 // Apply rate limiting to API routes
@@ -231,28 +324,19 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
       'https://yourdomain.com', // Add your custom domain if any
     ]
   : [
-      'http://localhost:5173',
+      'http://localhost:5173', // Added for Vite dev server
+      'http://localhost:5174', // Added for Vite dev server
+      'http://localhost:5175', // Added for Vite dev server
       'http://localhost:3000',
     ]
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) return callback(null, true)
-      
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        callback(null, true)
-      } else {
-        console.log('Blocked by CORS:', origin)
-        callback(new Error('Not allowed by CORS'), false)
-      }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  })
-)
+// Enable CORS for all origins in development
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' ? allowedOrigins : true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}))
 
 // Compression middleware for production
 if (process.env.NODE_ENV === 'production') {
@@ -278,6 +362,12 @@ app.use('/api/activity', activityRouter)
 app.use('/api/hourly-report', hourlyReportRouter)
 app.use('/api/daily-target', dailyTargetRouter)
 app.use('/api/employee-activity', employeeActivityRouter)
+if (leaveRouter) {
+  app.use('/api/leave', leaveRouter)
+  console.log('Leave router mounted at /api/leave')
+} else {
+  console.error('Leave router not available, skipping mount')
+}
 
 // Serve frontend static files in production
 if (process.env.NODE_ENV === 'production') {
@@ -297,14 +387,14 @@ if (process.env.NODE_ENV === 'production') {
   console.log('✓ Serving frontend static files from:', frontendPath)
 }
 
-// 404 handler for API routes
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ 
-    message: 'API endpoint not found',
-    path: req.originalUrl,
-    method: req.method 
-  })
-})
+// 404 handler for API routes - commented out due to path-to-regexp compatibility issues
+// app.use('/api/:param(*)', (req, res) => {
+//   res.status(404).json({
+//     message: 'API endpoint not found',
+//     path: req.originalUrl,
+//     method: req.method
+//   })
+// })
 
 // Global error handler
 app.use((err, req, res, next) => {
